@@ -154,12 +154,11 @@ class Cifar10Dataset(ImageDataset):
 
     inputs = []
     for filename in filenames:
-      with gfile.Open(filename, 'r') as f:
-        inputs.append(cPickle.load(f))
+      with gfile.Open(filename, 'rb') as f:
+        inputs.append(cPickle.load(f, encoding='latin1'))
     # See http://www.cs.toronto.edu/~kriz/cifar.html for a description of the
     # input format.
-    all_images = np.concatenate(
-        [each_input['data'] for each_input in inputs]).astype(np.float32)
+    all_images = np.concatenate([each_input['data'] for each_input in inputs]).astype(np.float32)
     all_labels = np.concatenate([each_input['labels'] for each_input in inputs])
     return all_images, all_labels
 

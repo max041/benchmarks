@@ -269,7 +269,8 @@ def train_image(image_buffer,
                 scope=None,
                 summary_verbosity=0,
                 distort_color_in_yiq=False,
-                fuse_decode_and_crop=False):
+                fuse_decode_and_crop=False,
+                datasets_make_deterministic=False):
   """Distort one image for training a network.
 
   Distorting images provides a useful technique for augmenting the data
@@ -335,9 +336,13 @@ def train_image(image_buffer,
     else:
       image = tf.image.decode_jpeg(image_buffer, channels=3,
                                    dct_method='INTEGER_FAST')
-      image = tf.slice(image, bbox_begin, bbox_size)
+      if not datasets_make_deterministic:
+          image = tf.slice(image, bbox_begin, bbox_size)
 
-    distorted_image = tf.image.random_flip_left_right(image)
+    if datasets_make_deterministic:
+        distorted_image = image
+    else:
+        distorted_image = tf.image.random_flip_left_right(image)
 
     # This resizing operation may distort the images because the aspect
     # ratio is not respected.
@@ -346,6 +351,7 @@ def train_image(image_buffer,
         distorted_image, [height, width],
         image_resize_method,
         align_corners=False)
+		
     # Restore the shape since the dynamic slice based upon the bbox_size loses
     # the third dimension.
     distorted_image.set_shape([height, width, 3])
@@ -447,7 +453,10 @@ class BaseImagePreprocessor(InputPreprocessor):
                shift_ratio=-1,
                summary_verbosity=0,
                distort_color_in_yiq=True,
-               fuse_decode_and_crop=True):
+               fuse_decode_and_crop=True,
+               datasets_make_deterministic=False,
+               verbose=False):
+			   
     super(BaseImagePreprocessor, self).__init__(batch_size, output_shape)
     # output_shape is in form (height, width, depth)
     self.height = output_shape[0]
@@ -468,6 +477,8 @@ class BaseImagePreprocessor(InputPreprocessor):
           (self.batch_size, self.num_splits))
     self.batch_size_per_split = self.batch_size // self.num_splits
     self.summary_verbosity = summary_verbosity
+    self.datasets_make_deterministic = datasets_make_deterministic
+    self.verbose = verbose
 
   def preprocess(self, image_buffer, bbox, batch_position):
     raise NotImplementedError('Must be implemented by subclass.')
@@ -486,17 +497,22 @@ class RecordInputImagePreprocessor(BaseImagePreprocessor):
   def preprocess(self, image_buffer, bbox, batch_position):
     """Preprocessing image_buffer as a function of its batch position."""
     if self.train:
-      image = train_image(image_buffer, self.height, self.width, bbox,
-                          batch_position, self.resize_method, self.distortions,
-                          None, summary_verbosity=self.summary_verbosity,
-                          distort_color_in_yiq=self.distort_color_in_yiq,
-                          fuse_decode_and_crop=self.fuse_decode_and_crop)
+        if self.datasets_make_deterministic:
+            image = train_image(image_buffer, self.height, self.width, bbox,
+                    batch_position, self.resize_method, self.distortions,
+                    None, summary_verbosity=self.summary_verbosity,
+                    datasets_make_deterministic=True)
+        else:
+            image = train_image(image_buffer, self.height, self.width, bbox,
+                    batch_position, self.resize_method, self.distortions,
+                    None, summary_verbosity=self.summary_verbosity,
+                    distort_color_in_yiq=self.distort_color_in_yiq,
+                    fuse_decode_and_crop=self.fuse_decode_and_crop)	  
     else:
-      image = tf.image.decode_jpeg(
-          image_buffer, channels=3, dct_method='INTEGER_FAST')
-      image = eval_image(image, self.height, self.width, batch_position,
-                         self.resize_method,
-                         summary_verbosity=self.summary_verbosity)
+        image = tf.image.decode_jpeg(image_buffer, channels=3, dct_method='INTEGER_FAST')
+        image = eval_image(image, self.height, self.width, batch_position,
+                self.resize_method,
+                summary_verbosity=self.summary_verbosity)
     # Note: image is now float32 [height,width,3] with range [0, 255]
 
     # image = tf.cast(image, tf.uint8) # HACK TESTING
@@ -519,8 +535,14 @@ class RecordInputImagePreprocessor(BaseImagePreprocessor):
       labels = [[] for _ in range(self.num_splits)]
       if use_datasets:
         ds = data_utils.create_dataset(
-            self.batch_size, self.num_splits, self.batch_size_per_split,
-            self.parse_and_preprocess, dataset, subset, self.train, cache_data)
+              self.batch_size, self.num_splits, self.batch_size_per_split,
+              self.parse_and_preprocess, dataset, subset, self.train, cache_data,
+              datasets_make_deterministic = self.datasets_make_deterministic,
+              verbose=self.verbose)
+	
+        if self.verbose:
+            data_utils.print_dataset(ds, tuples=True)
+		  
         ds_iterator = data_utils.create_iterator(ds)
         for d in xrange(self.num_splits):
           labels[d], images[d] = ds_iterator.get_next()
@@ -633,19 +655,34 @@ class Cifar10ImagePreprocessor(BaseImagePreprocessor):
       all_images, all_labels = dataset.read_data_files(subset)
       all_images = tf.constant(all_images)
       all_labels = tf.constant(all_labels)
-      input_image, input_label = tf.train.slice_input_producer(
-          [all_images, all_labels])
-      input_image = tf.cast(input_image, self.dtype)
-      input_label = tf.cast(input_label, tf.int32)
-      # Ensure that the random shuffling has good mixing properties.
-      min_fraction_of_examples_in_queue = 0.4
-      min_queue_examples = int(dataset.num_examples_per_epoch(subset) *
-                               min_fraction_of_examples_in_queue)
-      raw_images, raw_labels = tf.train.shuffle_batch(
-          [input_image, input_label], batch_size=self.batch_size,
-          capacity=min_queue_examples + 3 * self.batch_size,
-          min_after_dequeue=min_queue_examples)
+      if self.datasets_make_deterministic:
+          input_image = tf.cast(all_images, self.dtype)
+          input_label = tf.cast(all_labels, tf.int32)
 
+          dataset_train = tf.data.Dataset.from_tensor_slices((input_image, input_label))
+		
+          # Ensure that the random shuffling has good mixing properties.
+          min_fraction_of_examples_in_queue = 0.4
+          min_queue_examples = int(dataset.num_examples_per_epoch(subset) *
+                  min_fraction_of_examples_in_queue)
+          dataset_train_batch = dataset_train.batch(self.batch_size, drop_remainder=True)
+		
+          raw_images, raw_labels = dataset_train_batch.make_one_shot_iterator().get_next()
+          if self.verbose:
+              data_utils.print_dataset(dataset_train_batch)
+
+      else:
+           input_image = tf.cast(input_image, self.dtype)
+           input_label = tf.cast(input_label, tf.int32)
+           # Ensure that the random shuffling has good mixing properties.
+           min_fraction_of_examples_in_queue = 0.4
+           min_queue_examples = int(dataset.num_examples_per_epoch(subset) *
+                   min_fraction_of_examples_in_queue)
+           raw_images, raw_labels = tf.train.shuffle_batch(
+                   [input_image, input_label], batch_size=self.batch_size,
+                   capacity=min_queue_examples + 3 * self.batch_size,
+                   min_after_dequeue=min_queue_examples)	
+	 
       images = [[] for i in range(self.num_splits)]
       labels = [[] for i in range(self.num_splits)]
 

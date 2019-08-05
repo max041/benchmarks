@@ -130,6 +130,12 @@ flags.DEFINE_boolean('freeze_when_forward_only', False,
 flags.DEFINE_boolean('print_training_accuracy', False,
                      'whether to calculate and print training accuracy during '
                      'training')
+flags.DEFINE_boolean('datasets_make_deterministic', False,
+                     'Force deterministic load of datasets in input pipeline. ')
+flags.DEFINE_boolean('verbose', False,
+                     'Verbose logging enabled. This is currently used to enable '
+                     'logging of datasets along with their hash value. Can be '
+                     'extended in future for other debug purposes.')
 flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
 flags.DEFINE_integer('batch_group_size', 1,
                      'number of groups of batches processed in the image '
@@ -333,7 +339,7 @@ flags.DEFINE_boolean(
     'which deterministically prefetches the data onto the '
     'various GPUs')
 flags.DEFINE_integer(
-    'multi_device_iterator_max_buffer_size', 1,
+    'multi_device_iterator_max_buffer_size', 1,    
     'Configuration parameter for the MultiDeviceIterator that '
     ' specifies the host side buffer size for each device.')
 
@@ -528,6 +534,8 @@ flags.DEFINE_integer('save_model_secs', 0,
                      'checkpoints.')
 flags.DEFINE_integer('max_ckpts_to_keep', 5,
                      'Max number of checkpoints to keep.')
+flags.DEFINE_float('keep_ckpt_every_n_hours',1,
+			'keep checkpoint every n hours.')
 flags.DEFINE_string('train_dir', None,
                     'Path to session checkpoints. Pass None to disable saving '
                     'checkpoint at the end.')
@@ -1152,9 +1160,9 @@ class BenchmarkCNN(object):
     else:
       self.gpu_indices = [x for x in range(self.num_gpus)]
 
-    if (self.params.device == 'cpu' and self.params.data_format == 'NCHW' and
-        not self.params.mkl):
-      raise ValueError('device=cpu requires that data_format=NHWC')
+    #if (self.params.device == 'cpu' and self.params.data_format == 'NCHW' and
+    #    not self.params.mkl):
+    #  raise ValueError('device=cpu requires that data_format=NHWC')
 
     if ((self.params.num_epochs_per_decay or
          self.params.learning_rate_decay_factor) and
@@ -1766,7 +1774,7 @@ class BenchmarkCNN(object):
       is_chief = hvd.rank() == 0
     else:
       is_chief = (not self.job_name or self.task_index == 0)
-
+    
     summary_op = tf.summary.merge_all()
     summary_writer = None
     if (is_chief and self.params.summary_verbosity and self.params.train_dir and
@@ -1795,7 +1803,8 @@ class BenchmarkCNN(object):
       saver = tf.train.Saver(
           self.variable_mgr.savable_variables(),
           save_relative_paths=True,
-          max_to_keep=self.params.max_ckpts_to_keep)
+          max_to_keep=self.params.max_ckpts_to_keep,
+	  keep_checkpoint_every_n_hours=self.params.keep_ckpt_every_n_hours)
     else:
       saver = None
     ready_for_local_init_op = None
@@ -2741,7 +2750,9 @@ class BenchmarkCNN(object):
         shift_ratio=shift_ratio,
         summary_verbosity=self.params.summary_verbosity,
         distort_color_in_yiq=self.params.distort_color_in_yiq,
-        fuse_decode_and_crop=self.params.fuse_decode_and_crop)
+        fuse_decode_and_crop=self.params.fuse_decode_and_crop,
+	datasets_make_deterministic=self.params.datasets_make_deterministic,
+	verbose=self.params.verbose)
 
   def add_sync_queues_and_barrier(self, name_prefix, enqueue_after_list):
     """Adds ops to enqueue on all worker queues.

@@ -96,6 +96,28 @@ def get_inputs_and_labels(function_buffering_resource, data_type):
       function_buffer_resource=function_buffering_resource,
       output_types=[data_type, tf.int32])
 
+def print_dataset(ds, tuples=False):
+  sess = tf.Session()
+  next_data = ds.make_one_shot_iterator().get_next()
+
+   # Print at most first 2 minibatches
+  for i in range(2):
+      try:
+          import hashlib
+          if not tuples:
+            tData = sess.run(next_data)
+            data_str = str(tData)
+            print(data_str);
+            print("!!!Hash: {}".format(hashlib.sha1(data_str.encode('utf-8')).hexdigest()))
+          else:
+            t1, t2 = sess.run(next_data)
+            t1_str = str(t1)
+            t2_str = str(t2)
+            print(t1, t2)
+            print("!!!Hash: t1: {}, t2: {}".format(hashlib.sha1(t1_str.encode('utf-8')).hexdigest(),
+              hashlib.sha1(t2_str.encode('utf-8')).hexdigest()))
+      except tf.errors.OutOfRangeError:
+          break
 
 def create_dataset(batch_size,
                    num_splits,
@@ -105,16 +127,26 @@ def create_dataset(batch_size,
                    subset,
                    train,
                    cache_data,
-                   num_threads=None):
+                   num_threads=None,
+		   datasets_make_deterministic=False,
+    		   verbose=False):
   """Creates a dataset for the benchmark."""
   glob_pattern = dataset.tf_record_pattern(subset)
   file_names = gfile.Glob(glob_pattern)
   if not file_names:
     raise ValueError('Found no files in --data_dir matching: {}'
                      .format(glob_pattern))
+  if datasets_make_deterministic:
+    ds = tf.data.TFRecordDataset.list_files(file_names, shuffle=False, seed=10)
+  else:
+    ds = tf.data.TFRecordDataset.list_files(file_names)
+
+  if verbose:
+    print_dataset(ds)
+
   ds = tf.data.TFRecordDataset.list_files(file_names)
   ds = ds.apply(
-      interleave_ops.parallel_interleave(
+      tf.data.experimental.parallel_interleave(
           tf.data.TFRecordDataset, cycle_length=10))
   if cache_data:
     ds = ds.take(1).cache().repeat()
@@ -122,7 +154,7 @@ def create_dataset(batch_size,
   counter = counter.repeat()
   ds = tf.data.Dataset.zip((ds, counter))
   ds = ds.prefetch(buffer_size=batch_size)
-  if train:
+  if train and not datasets_make_deterministic:
     ds = ds.shuffle(buffer_size=10000)
   ds = ds.repeat()
   ds = ds.apply(

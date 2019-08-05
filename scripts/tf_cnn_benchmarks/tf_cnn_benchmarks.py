@@ -23,6 +23,9 @@ from __future__ import print_function
 from absl import app
 from absl import flags as absl_flags
 import tensorflow as tf
+import ngraph_bridge
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import benchmark_cnn
 import cnn_util
