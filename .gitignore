@@ -1,2 +1,8 @@
 # PyCharm
 .idea/
+
+scripts/tf_cnn_benchmarks/__pycache__/
+scripts/tf_cnn_benchmarks/models/__pycache__/
+scripts/tf_cnn_benchmarks/models/experimental/__pycache__/
+scripts/tf_cnn_benchmarks/platforms/__pycache__/
+scripts/tf_cnn_benchmarks/platforms/default/__pycache__/

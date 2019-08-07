@@ -1899,10 +1899,12 @@ class BenchmarkCNN(object):
         # 1. In non-single session mode, each step, the global_step is
         # incremented once per worker. This means we need to divide
         # init_global_step by num_workers only in non-single session mode.
-        end_local_step = self.num_batches - self.init_global_step
+        # end_local_step = self.num_batches - self.init_global_step
+        end_local_step = self.num_batches
       else:
-        end_local_step = self.num_batches - (self.init_global_step /
-                                             self.num_workers)
+        # end_local_step = self.num_batches - (self.init_global_step /
+        #                                      self.num_workers)
+        end_local_step = self.num_batches
 
       if not global_step_watcher:
         # In cross-replica sync mode, all workers must run the same number of
