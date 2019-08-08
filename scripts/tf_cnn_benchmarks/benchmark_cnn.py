@@ -696,7 +696,7 @@ def get_mode_from_params(params):
 
 
 # How many digits to show for the loss and accuracies during training.
-LOSS_AND_ACCURACY_DIGITS_TO_SHOW = 3
+LOSS_AND_ACCURACY_DIGITS_TO_SHOW = 8
 
 
 def benchmark_one_step(sess,
